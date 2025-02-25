@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nhận diện số 1-5 bằng tay trái (Webcam lớn & Background động)</title>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
+  <style>
+    /* Reset & Box sizing */
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Roboto', sans-serif;
+      /* Background image động từ Giphy */
+      background: url('https://i.gifer.com/J4o.gif') center center/cover no-repeat;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      position: relative;
+    }
+    
+    /* Overlay mờ để tăng độ tương phản cho chữ */
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: -1;
+    }
+    
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      padding: 30px;
+      width: 100%;
+      max-width: 1400px;
+      position: relative;
+      z-index: 1;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+      font-weight: 700;
+      font-size: 2.4em;
+      color: #fff;
+      /* Text-shadow giúp tăng độ rõ nét */
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+    }
+    
+    .row {
+      display: flex;
+      justify-content: space-around;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    
+    .col {
+      flex: 1;
+      margin: 10px;
+      min-width: 480px;
+      text-align: center;
+    }
+    
+    /* Webcam và canvas giữ kích thước hiện tại */
+    video, canvas {
+      border: 2px solid #fff;
+      border-radius: 10px;
+      width: 100%;
+      max-width: 640px;
+      height: auto;
+      margin: 10px auto;
+      display: block;
+    }
+    
+    /* Output style với màu chữ sáng và text-shadow để tăng độ tương phản */
+    #output {
+      font-size: 1.8em;
+      font-weight: 500;
+      margin-top: 20px;
+      color: #fff;
+      text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .row {
+        flex-direction: column;
+        align-items: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Overlay cho background -->
+  <div class="overlay"></div>
+  <div class="container">
+    <h1>Nhận diện số (1-5) bằng tay trái</h1>
+    <div class="row">
+      <div class="col">
+        <video id="video" autoplay playsinline width="640" height="480"></video>
+      </div>
+      <div class="col">
+        <canvas id="canvas" width="640" height="480"></canvas>
+      </div>
+      <div class="col">
+        <div id="output">Đang chờ nhận diện...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thư viện TensorFlow.js & Handpose -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
+
+  <script>
+    const video   = document.getElementById('video');
+    const canvas  = document.getElementById('canvas');
+    const ctx     = canvas.getContext('2d');
+    const output  = document.getElementById('output');
+    let model;
+
+    // Cấu trúc kết nối giữa các landmark theo mô hình Handpose
+    const fingerJoints = {
+      thumb: [0, 1, 2, 3, 4],
+      indexFinger: [0, 5, 6, 7, 8],
+      middleFinger: [0, 9, 10, 11, 12],
+      ringFinger: [0, 13, 14, 15, 16],
+      pinky: [0, 17, 18, 19, 20]
+    };
+
+    // Cài đặt webcam
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 },
+          audio: false
+        });
+        video.srcObject = stream;
+        return new Promise(resolve => {
+          video.onloadedmetadata = () => resolve(video);
+        });
+      } catch (error) {
+        alert("Không thể truy cập webcam: " + error);
+      }
+    }
+
+    // Vẽ các điểm landmark và các đường nối giữa chúng
+    function drawHand(landmarks) {
+      // Vẽ các điểm landmark (màu đỏ)
+      for (let i = 0; i < landmarks.length; i++) {
+        const [x, y] = landmarks[i];
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = "red";
+        ctx.fill();
+      }
+      // Vẽ các đường nối giữa các landmark theo từng ngón tay (màu xanh)
+      for (let finger in fingerJoints) {
+        const points = fingerJoints[finger];
+        for (let i = 0; i < points.length - 1; i++) {
+          const [x1, y1] = landmarks[points[i]];
+          const [x2, y2] = landmarks[points[i + 1]];
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "blue";
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Hàm xác định trạng thái từng ngón tay dựa trên tọa độ landmark
+    function getFingerState(landmarks) {
+      let fingerStates = {
+        thumb: false,
+        index: false,
+        middle: false,
+        ring: false,
+        pinky: false
+      };
+
+      // Với ngón cái: giả sử tay trái, nếu landmark[4] có tọa độ x nhỏ hơn landmark[3] thì coi là duỗi.
+      if (landmarks[4][0] < landmarks[3][0] - 5) {
+        fingerStates.thumb = true;
+      }
+      // Với các ngón còn lại: nếu điểm tip có tọa độ y nhỏ hơn khớp giữa thì coi là duỗi
+      if (landmarks[8][1] < landmarks[6][1] - 5) {
+        fingerStates.index = true;
+      }
+      if (landmarks[12][1] < landmarks[10][1] - 5) {
+        fingerStates.middle = true;
+      }
+      if (landmarks[16][1] < landmarks[14][1] - 5) {
+        fingerStates.ring = true;
+      }
+      if (landmarks[20][1] < landmarks[18][1] - 5) {
+        fingerStates.pinky = true;
+      }
+      return fingerStates;
+    }
+
+    // Hàm đếm số ngón tay được duỗi
+    function countExtendedFingers(fingerStates) {
+      let count = 0;
+      for (let finger in fingerStates) {
+        if (fingerStates[finger]) count++;
+      }
+      return count;
+    }
+
+    // Hàm nhận diện tay theo từng khung hình
+    async function detectHands() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const predictions = await model.estimateHands(video);
+      if (predictions.length > 0) {
+        const landmarks = predictions[0].landmarks;
+        drawHand(landmarks);
+        const fingerStates = getFingerState(landmarks);
+        const count = countExtendedFingers(fingerStates);
+        output.innerText = "Số ngón tay giơ: " + count;
+      } else {
+        output.innerText = "Không phát hiện tay";
+      }
+      requestAnimationFrame(detectHands);
+    }
+
+    async function main() {
+      await setupCamera();
+      video.play();
+      model = await handpose.load();
+      console.log("Mô hình Handpose đã được tải.");
+      detectHands();
+    }
+
+    main();
+  </script>
+</body>
+</html>
